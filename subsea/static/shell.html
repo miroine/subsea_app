@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html,body{margin:0;height:100%;font-family:Arial,'Helvetica Neue',Helvetica,sans-serif;background:#fff;color:#051C2C}
+  #wrap{position:relative;height:100%;display:flex;flex-direction:column}
+  #bar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid #D5DCE4;background:#F3F6FA;font-size:11px;align-items:stretch}
+  .tool-group{display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:16px 8px 6px;position:relative;background:#fff;border:1px solid #D5DCE4;border-radius:5px}
+  .tool-group::before{content:attr(aria-label);position:absolute;top:3px;left:8px;font-size:9px;font-weight:700;letter-spacing:.07em;color:#5B6B7B;text-transform:uppercase}
+  #bar button,#insp button{border:1px solid #B8C4D2;background:#fff;color:#051C2C;border-radius:4px;padding:6px 9px;font:inherit;font-size:11px;cursor:pointer;min-height:30px}
+  #bar button:hover:not(:disabled),#insp button:hover:not(:disabled){background:#E7EDFA;color:#051C2C;border-color:#2251FF}
+  #bar button:disabled,#insp button:disabled{opacity:.42;cursor:not-allowed}
+  button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid #2251FF;outline-offset:2px}
+  #bar #b_palette{background:#051C2C;color:#fff;border-color:#051C2C}
+  #statusbar{display:flex;flex-wrap:wrap;gap:6px 16px;justify-content:space-between;padding:6px 12px;border-top:1px solid #D5DCE4;background:#F3F6FA;color:#5B6B7B;font-size:10px;line-height:1.4}
+  #statusbar details{max-width:560px}
+  #statusbar summary{cursor:pointer;font-weight:600}
+  #statusbar p{margin:4px 0}
+  #connect-status{color:#051C2C;flex:1}
+  #bar .sp{flex:1}
+  #bar .hint{color:#5B6B7B;font-size:10.5px;margin-right:8px}
+  #svg{flex:1;width:100%;min-height:0;touch-action:none;cursor:grab;display:block}
+  #svg .el.node{cursor:move}
+  #svg .el.link{cursor:move}
+  #svg .el.sel{filter:drop-shadow(0 0 3px #2251FF)}
+  #svg .connection{cursor:pointer}
+  #svg .connection.sel{filter:drop-shadow(0 0 3px #2251FF)}
+  #svg .route-handle{cursor:move;fill:#fff;stroke:#2251FF;stroke-width:2}
+  #svg .route-end{cursor:crosshair;fill:#dce7ff}
+  #svg [data-zone-part]{cursor:move}
+  #svg .zone-handle{fill:#fff;stroke:#2251FF;stroke-width:2}
+  #svg.connecting #zone-controls,#svg.connecting .zone-hit-targets{display:none}
+  #insp input[id^="z_"][type=number]{width:100%}
+  #svg.connecting .route-handle{display:none}
+  .connection-port{display:none}
+  #svg.connecting .connection-port{display:inline;cursor:crosshair}
+  #svg.connecting .legacy-host-port{display:none}
+  #svg.connecting .connection-port.port-unavailable{opacity:.15;pointer-events:none}
+  #svg.connecting .connection-port.port-source circle:not(.port-hit){stroke:#2251FF;fill:#dce7ff}
+  #svg.connecting{cursor:crosshair}
+  #svg .el.connect-candidate{filter:drop-shadow(0 0 5px #00A878)}
+  #svg .el.connect-candidate .hit{stroke:#00A878;stroke-width:3;stroke-dasharray:4 2}
+  #svg .el.connect-source{filter:drop-shadow(0 0 6px #2251FF)}
+  #svg .el.connect-source .hit{stroke:#2251FF;stroke-width:3}
+  #svg.connecting .el.connect-candidate{cursor:crosshair}
+  #palette{position:absolute;display:none;left:10px;top:calc(var(--toolbar-height,46px) + 8px);width:290px;max-height:min(68vh,620px);box-sizing:border-box;background:#fff;border:1px solid #D5DCE4;box-shadow:0 8px 24px rgba(5,28,44,.2);z-index:3;flex-direction:column}
+  #palette.open{display:flex}
+  #palette-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 4px}
+  #palette h2{font:700 12px Arial,sans-serif;letter-spacing:.08em;text-transform:uppercase;margin:0;color:#051C2C}
+  #palette-close{border:0;background:transparent;color:#5B6B7B;font-size:20px;line-height:1;cursor:pointer}
+  #palette p{font-size:10px;line-height:1.4;color:#5B6B7B;margin:4px 12px 8px}
+  #palette input,#palette select{box-sizing:border-box;width:calc(100% - 24px);margin:0 12px 8px;padding:7px;border:1px solid #B8C4D2;border-radius:0;font:11px Arial,sans-serif;color:#051C2C;background:#fff}
+  #palette-list{overflow:auto;padding:0 8px 8px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+  .palette-item{min-height:40px;text-align:left;padding:6px 7px;border:1px solid #D5DCE4;background:#fff;color:#051C2C;font:11px Arial,sans-serif;cursor:grab}
+  .palette-item:hover,.palette-item.active{border-color:#2251FF;background:#F3F6FA}
+  .palette-item small{display:block;color:#5B6B7B;font-size:9px;margin-top:3px}
+  #palette-empty{padding:10px;color:#5B6B7B;font-size:11px}
+  #svg.placement{cursor:crosshair}
+  #svg.drop-target{outline:2px dashed #2251FF;outline-offset:-4px}
+  #tip{position:absolute;display:none;max-width:260px;background:#051C2C;color:#fff;padding:8px 10px;font-size:11px;line-height:1.4;pointer-events:none;z-index:5;border-left:3px solid #2251FF}
+  #tip span{color:#B8C4D2}
+  #insp{position:absolute;right:12px;top:calc(var(--toolbar-height,44px) + 8px);width:240px;max-height:calc(100% - var(--toolbar-height,44px) - 42px);overflow-y:auto;display:none;background:#fff;border:1px solid #051C2C;padding:10px 12px;font-size:11.5px;box-shadow:0 6px 18px rgba(5,28,44,.14);z-index:4}
+  #insp label{display:block;margin-top:7px;color:#5B6B7B;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+  #insp input{width:100%;box-sizing:border-box;font:inherit;padding:4px 6px;border:1px solid #B8C4D2;border-radius:0;color:#051C2C}
+  #insp input[type=number]{width:62px}
+  #insp input[type=checkbox]{width:auto}
+  #insp select{width:100%;padding:4px;border:1px solid #B8C4D2;background:#fff;color:#051C2C}
+  #insp small{color:#5B6B7B}
+  #insp .size-actions{display:flex;gap:4px;margin:6px 0 10px}
+  #insp .size-actions button{padding:4px 6px;flex:1}
+  @media print{#bar,#statusbar,#insp,#tip,#palette{display:none!important}}
+#bar button.on{background:#0b2545;color:#fff}
+#wrap:fullscreen{width:100vw;height:100vh;background:#fff}
+#wrap:fullscreen #palette{max-height:min(72vh,900px);width:320px}
+#fullscreen-error{display:none;color:#b42318;font-size:11px}
+.riser-detail-editor{position:fixed;inset:0;z-index:100;background:#fff;display:flex;flex-direction:column;font:12px Arial,sans-serif;color:#051C2C}
+.rd-toolbar{display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding:10px;border-bottom:1px solid #b8c4d2;background:#f3f6fa}
+.rd-toolbar button,.riser-detail-editor button,.rd-upload{padding:7px 9px;border:1px solid #b8c4d2;border-radius:4px;background:#fff;color:#051c2c;cursor:pointer;font:inherit}
+.rd-toolbar button.on{background:#2251ff;color:#fff}
+.rd-toolbar select{padding:7px;font:inherit}
+.rd-upload{position:relative;overflow:hidden}
+.rd-upload input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+#rd-status,#rd-error,.rd-footnote{margin:5px 12px;line-height:1.4}
+#rd-error{color:#b42318}
+.rd-workspace{display:grid;grid-template-columns:minmax(0,1fr) 260px;min-height:0;flex:1}
+#rd-svg{width:100%;height:100%;min-height:0;touch-action:none;border-right:1px solid #d5dce4}
+#rd-svg [data-rd-type],#rd-svg .rd-bend{cursor:move}
+#rd-svg .rd-selected{filter:drop-shadow(0 0 3px #2251ff)}
+#rd-settings{padding:10px 12px;overflow:auto}
+#rd-settings label{display:block;margin-top:10px}
+#rd-settings input:not([type=checkbox]),#rd-settings select{box-sizing:border-box;width:100%;padding:6px;font:inherit;border:1px solid #b8c4d2;margin-top:3px}
+#rd-settings button{margin-top:12px}
+#scene3d{position:absolute;inset:var(--toolbar-height,100px) 0 32px;background:#062832;z-index:2;overflow:hidden}
+#scene3d[hidden]{display:none}
+#scene3d canvas{display:block;width:100%;height:100%;touch-action:none}
+.scene3d-tools{position:absolute;left:12px;top:12px;z-index:2;display:flex;gap:6px;flex-wrap:wrap;max-width:calc(100% - 285px)}
+.scene3d-tools button{border:1px solid #7aadb8;border-radius:4px;padding:7px 10px;background:#0b3442;color:#fff;cursor:pointer}
+.scene3d-tools button.on{background:#276784}
+.scene3d-tools button:disabled{opacity:.45;cursor:not-allowed}
+#scene3d-info{position:absolute;left:12px;bottom:12px;max-width:calc(100% - 285px);color:#e5f5f8;background:#062832dd;padding:8px 12px;font-size:11px;pointer-events:none}
+#scene3d-error{position:absolute;left:12px;top:58px;background:#fff;color:#b42318;padding:12px;z-index:3}
+#scene3d-error:empty{display:none}
+@media(max-width:640px){#palette{left:6px;width:min(290px,calc(100vw - 12px));max-height:65vh}#bar .hint{display:none}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="bar" style="__BAR_DISPLAY__">
+    <div class="tool-group" role="group" aria-label="Draw">
+      <button id="b_palette" aria-expanded="false" aria-controls="palette" title="Open the symbol library to place equipment">Symbols</button><button id="b_custom_element" title="Create a blank element and draw its shapes, piping, valves and hubs">+ Custom element</button><button id="b_connect" aria-pressed="false" title="Drag between compatible equipment ports to connect them">Connect</button><button id="b_zone" title="Add an adjustable zone or distance. Select equipment first to anchor the zone to it.">+ Zone</button><button id="b_riser_detail" disabled title="Select custom equipment, a riser base or riser skid to edit its internal drawing">Element designer</button><button id="b_copy" disabled title="Copy selected equipment">Copy</button><button id="b_delete" disabled title="Delete the selected equipment, connection or zone">Delete</button>
+    </div>
+    <div class="tool-group" role="group" aria-label="View">
+      <button id="b_2d" class="on" aria-pressed="true">2D design</button><button id="b_3d" aria-pressed="false">3D view</button><button id="b_fit" title="Fit view without moving equipment">Fit view</button><button id="b_in" aria-label="Zoom in" title="Zoom in">+</button><button id="b_out" aria-label="Zoom out" title="Zoom out">−</button><button id="b_grid" aria-pressed="false">Grid</button><button id="b_fullscreen">Full screen</button>
+    </div>
+    <div class="tool-group" role="group" aria-label="Arrange">
+      <button id="b_layout" title="Space disconnected blocks without deforming connected equipment or piping. Freely positioned zones keep the drawing fixed.">Best layout</button><button id="b_undo_layout" disabled>Undo layout</button><button id="b_reset" title="Clear manual position, size, label and visibility overrides">Reset overrides</button>
+    </div>
+    <div class="tool-group" role="group" aria-label="Presentation">
+      <button id="b_improve" title="Refine typography, equipment tags and hatching without moving equipment or rerouting lines">Improve appearance</button><button id="b_undo_improve" disabled>Undo appearance</button>
+    </div>
+    <div class="tool-group" role="group" aria-label="Flow">
+      <button id="b_flow" class="on" aria-pressed="true" title="Toggle flow animation">Animate flow</button><input id="b_spd" type="range" min="0.25" max="3" step="0.25" value="1" aria-label="Flow speed" title="Flow speed" style="width:70px;vertical-align:middle">
+    </div>
+    <div class="tool-group" role="group" aria-label="Export">
+      <button id="b_svg" title="Download current view as vector SVG (3D is a flat projection)">SVG</button><button id="b_html" disabled title="Download an offline interactive 3D viewer with the current design and camera">3D HTML</button><button id="b_png" title="Download image (PNG)">PNG</button><button id="b_json" title="Download editable design (JSON)">JSON</button><button id="b_print">Print</button>
+    </div>
+  </div>
+  <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+  <section id="scene3d" hidden aria-label="Interactive 3D view">
+    <div class="scene3d-tools"><button id="scene3d-orbit" class="on" aria-pressed="true">Orbit / inspect</button><button id="scene3d-move" aria-pressed="false">Move equipment</button><button id="scene3d-focus" disabled>Focus selected</button><button id="scene3d-top">Top view</button><button id="scene3d-labels" aria-pressed="false">Labels</button></div>
+    <div id="scene3d-error" role="alert"></div><div id="scene3d-info">Loading 3D renderer...</div>
+  </section>
+  <aside id="palette" aria-label="Symbol library">
+    <div id="palette-head"><h2>Symbol library</h2><button id="palette-close" aria-label="Close symbol library">&times;</button></div>
+    <p>On a preset, click equipment to add it to the main flowpath, or drag it onto the drawing. Click a host, then click to place it independently. On a blank canvas, click any symbol, then click to place it. Select symbols or existing hosts to move, resize, copy or delete them.</p>
+    <input id="palette-search" type="search" placeholder="Search symbols" aria-label="Search symbols">
+    <select id="palette-category" aria-label="Filter symbols by category"><option value="">All categories</option></select>
+    <div id="palette-list"></div>
+  </aside>
+  <div id="tip"></div>
+  <div id="insp"></div>
+  <div id="statusbar" style="__BAR_DISPLAY__">
+    <span id="fullscreen-error" role="status"></span><span id="connect-status" role="status" aria-live="polite">Ready. Open Symbols to add equipment, or select an item to edit it.</span>
+    <details><summary>Drawing help</summary><p>Drag equipment to move it. Shift-click selects multiple items. Select a line to edit its route; double-click adds a bend. Connect exposes compatible ports. Fit view changes zoom only; Best layout moves equipment. Improve appearance keeps positions unchanged.</p></details>
+  </div>
+</div>
+<script id="three-library" type="application/json">/*__THREE_LIBRARY__*/{}</script>
+<script id="design-spec" type="application/json">/*__SPEC__*/null</script>
+<script id="initial-view" type="application/json">{}</script>
+<script>/*__ENGINE__*/</script>
+<script>
+  const SPEC = JSON.parse(document.getElementById('design-spec').textContent);
+  const CATALOG = /*__CATALOG__*/[];
+  const TAGMAP = /*__TAGS__*/{};
+  Subsea.setTags(TAGMAP);
+  Subsea.setConnectionTypes(/*__CONNECTION_TYPES__*/{});
+  Subsea.setEquipmentOptions(/*__EQUIPMENT_OPTIONS__*/{});
+  const MODE = "__MODE__";
+  const root = document.getElementById('wrap');
+  if (MODE === 'catalog') Subsea.mountCatalog(root, CATALOG); else Subsea.mount(root, SPEC, CATALOG);
+</script>
+</body>
+</html>

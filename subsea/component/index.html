@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:100%;overflow:hidden}iframe{width:100%;height:100%;border:0;display:block}
+</style></head><body>
+<iframe id="editor" title="Subsea drawing editor" allow="fullscreen"></iframe>
+<script>
+const frame = document.getElementById('editor');
+let documentId, args, sequence = 0, snapshot = '', loading = false;
+const canonical = value => JSON.stringify(value, (key, entry) =>
+  entry && typeof entry === 'object' && !Array.isArray(entry)
+    ? Object.keys(entry).sort().reduce((result, name) => { result[name] = entry[name]; return result; }, {})
+    : entry);
+function send(type, data) {
+  window.parent.postMessage({isStreamlitMessage:true, type, ...data}, '*');
+}
+function changed() {
+  const state = frame.contentWindow.__subsea;
+  if (!state || loading) return;
+  const value = {spec:state.spec, selected:state.sel, selectedIds:state.getSelectedIds(), selectedPorts:state.getSelectedPorts(), selectedConnection:state.getSelectedConnection(), internalValveOptions:state.getInternalValveOptions()};
+  const next = canonical(value);
+  if (next === snapshot) return;
+  snapshot = next;
+  sequence += 1;
+  send('streamlit:setComponentValue', {
+    value:{...JSON.parse(JSON.stringify(value)), documentId, sequence}, dataType:'json'
+  });
+}
+frame.addEventListener('load', () => {
+  loading = false;
+  frame.contentWindow.addEventListener('subsea-change', changed);
+  changed();
+});
+window.addEventListener('message', event => {
+  if (event.source !== window.parent || event.data.type !== 'streamlit:render') return;
+  args = event.data.args;
+  document.body.style.height = args.height + 'px';
+  send('streamlit:setFrameHeight', {height:args.height});
+  if (documentId !== args.documentId || !frame.getAttribute('srcdoc')) {
+    documentId = args.documentId; sequence = 0; loading = true;
+    snapshot = canonical({spec:args.spec, selected:null, selectedIds:[], selectedPorts:[], selectedConnection:null, internalValveOptions:{pipes:[],defaults:[]}});
+    frame.srcdoc = args.html;
+  } else if (!loading && args.ack >= sequence) {
+    const state = frame.contentWindow.__subsea;
+    if (state && canonical(state.spec) !== canonical(args.spec)) {
+      state.replaceSpec(args.spec);
+    }
+    if (state) snapshot = canonical({spec:state.spec, selected:state.sel, selectedIds:state.getSelectedIds(), selectedPorts:state.getSelectedPorts(), selectedConnection:state.getSelectedConnection(), internalValveOptions:state.getInternalValveOptions()});
+  }
+});
+send('streamlit:componentReady', {apiVersion:1});
+</script></body></html>
