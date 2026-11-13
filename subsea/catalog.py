@@ -24,6 +24,7 @@ _ROWS = [
     # ---- Hosts -----------------------------------------------------------
     ("jacket", "Fixed jacket platform", "Hosts & topsides", "host", "Piled steel jacket with deck; risers clamped to the legs (J-tubes / riser slots)."),
     ("platform", "Compliant / small fixed platform", "Hosts & topsides", "host", "Lighter fixed or unmanned wellhead platform with riser slots."),
+    ("jackup", "Jackup drilling / well-test unit", "Hosts & topsides", "host", "Elevated deck on three independent lattice legs with spudcans, drilling derrick and host riser interfaces; concept only."),
     ("fpso", "FPSO", "Hosts & topsides", "host", "Floating production, storage and offloading vessel, turret moored."),
     ("semisub", "Semi-submersible", "Hosts & topsides", "host", "Column-stabilised floating production unit."),
     ("tlp", "Tension-leg platform", "Hosts & topsides", "host", "Floater held by vertical tendons; top-tensioned or flexible risers."),

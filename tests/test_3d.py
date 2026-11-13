@@ -13,6 +13,8 @@ from playwright.sync_api import sync_playwright, expect
 from subsea.cases import CaseStore
 from subsea.catalog import CATALOG
 from subsea.html import build_html
+from subsea.installation import installation_list
+from subsea.presets import get_preset
 from subsea.riser_detail import illustrated_riser_configuration
 from subsea.spec import validate
 from test_connections import browser_executable
@@ -36,12 +38,627 @@ def design():
 
 
 class ThreeDTests(unittest.TestCase):
+    def test_anchor_editor_inserts_edits_drags_removes_and_reloads_all_lanes(self):
+        spec = {"freeform": True, "showLegend": False, "animate": False,
+                "chain": [{"id": "line", "type": "pipeline_rigid", "x": 80, "y": 120, "w": 240},
+                          {"id": "m1", "type": "manifold", "x": 650, "y": 250, "slots": 4}],
+                "connections": [{"from": "line", "fromPort": f"{lane}-right", "to": "m1", "toPort": f"{lane}-left",
+                                 "lane": lane, "style": "flex", "label": f"Retain {lane}", "provider": "Example",
+                                 "waypoints": [{"x": 390, "y": 280}, {"x": 570, "y": 350}]}
+                                for lane in ("P", "S", "U")]}
+        with tempfile.TemporaryDirectory(prefix="subsea-anchor-editor-") as directory, sync_playwright() as pw:
+            browser = pw.chromium.launch(executable_path=browser_executable(), args=["--enable-unsafe-swiftshader"])
+            try:
+                page = browser.new_page(viewport={"width": 1600, "height": 1000}, accept_downloads=True)
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                path = Path(directory) / "anchors.html"
+                path.write_text(build_html(spec), encoding="utf-8")
+                page.goto(path.as_uri())
+                page.click("#b_3d")
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0")
+                page.click("#scene3d-top")
+                page.click("#scene3d-anchor-mode")
+                for index, lane in enumerate(("P", "S", "U")):
+                    key = json.dumps(["connection", index], separators=(",", ":"))
+                    page.locator("#scene3d-route").select_option(key)
+                    page.locator("#scene3d-anchor").select_option("0")
+                    page.click("#scene3d-anchor-add")
+                    anchors = page.evaluate("i=>window.__subsea.spec.connections[i].waypoints", index)
+                    self.assertEqual(len(anchors), 3)
+                    self.assertEqual([anchors[0], anchors[2]], spec["connections"][index]["waypoints"])
+                    for field, value in (("x", 460 + index * 10), ("y", 430 + index * 50), ("height", 2 + index)):
+                        page.locator("#scene3d-anchor-" + field).fill(str(value))
+                        page.locator("#scene3d-anchor-" + field).press("Tab")
+                    anchors = page.evaluate("i=>window.__subsea.spec.connections[i].waypoints", index)
+                    self.assertEqual(anchors[1], {"x": 460 + index * 10, "y": 430 + index * 50, "elevation3D": 2 + index})
+                    before = page.evaluate("structuredClone(window.__subsea.spec)")
+                    page.locator("#scene3d-anchor-x").fill("")
+                    page.locator("#scene3d-anchor-x").press("Tab")
+                    self.assertEqual(page.evaluate("window.__subsea.spec"), before)
+                    self.assertIn("finite numbers", page.locator("#scene3d-error").text_content())
+                    page.locator("#scene3d-anchor-x").fill(str(anchors[1]["x"]))
+                    page.locator("#scene3d-anchor-x").press("Tab")
+
+                    handle = page.evaluate("""key=>window.__subsea.scene3D.diagnostics().connectionHandles.find(
+                        h=>h.routeKey===key&&h.kind==='bend'&&h.waypointIndex===1)""", key)
+                    canvas = page.locator("#scene3d canvas").bounding_box()
+                    x, y = canvas["x"] + handle["screen"]["x"], canvas["y"] + handle["screen"]["y"]
+                    before = page.evaluate("structuredClone(window.__subsea.spec)")
+                    page.mouse.move(x, y)
+                    page.mouse.down()
+                    page.mouse.move(x + 45, y + 35, steps=6)
+                    self.assertEqual(page.evaluate("window.__subsea.spec"), before)
+                    page.keyboard.press("Escape")
+                    page.mouse.up()
+                    self.assertEqual(page.evaluate("window.__subsea.spec"), before)
+                    page.mouse.move(x, y)
+                    page.mouse.down()
+                    page.mouse.move(x + 45, y + 35, steps=6)
+                    page.mouse.up()
+                    moved = page.evaluate("i=>window.__subsea.spec.connections[i].waypoints", index)
+                    self.assertNotEqual(moved[1], anchors[1])
+                    self.assertEqual(moved[1]["elevation3D"], anchors[1]["elevation3D"])
+                    self.assertEqual([moved[0], moved[2]], [anchors[0], anchors[2]])
+
+                    ring = page.evaluate("""key=>window.__subsea.scene3D.diagnostics().connectionHandles.find(
+                        h=>h.routeKey===key&&h.kind==='insert'&&h.waypointIndex===1)""", key)
+                    page.mouse.click(canvas["x"] + ring["screen"]["x"], canvas["y"] + ring["screen"]["y"])
+                    inserted = page.evaluate("i=>window.__subsea.spec.connections[i].waypoints", index)
+                    self.assertEqual(len(inserted), 4)
+                    self.assertEqual(inserted[:1] + inserted[2:], moved)
+                    page.click("#scene3d-anchor-remove")
+                    self.assertEqual(page.evaluate("i=>window.__subsea.spec.connections[i].waypoints", index), moved)
+                    for _ in range(len(moved)):
+                        page.click("#scene3d-anchor-remove")
+                    self.assertEqual(page.evaluate("i=>window.__subsea.spec.connections[i].waypoints", index), [])
+                    self.assertTrue(page.locator("#scene3d-anchor-remove").is_disabled())
+                    page.click("#scene3d-anchor-add")
+                    current = page.evaluate("i=>window.__subsea.spec.connections[i]", index)
+                    self.assertEqual({k: v for k, v in current.items() if k != "waypoints"},
+                                     {k: v for k, v in spec["connections"][index].items() if k != "waypoints"})
+                saved = page.evaluate("structuredClone(window.__subsea.spec)")
+                self.assertTrue(installation_list(saved).equals(installation_list(spec)))
+                self.assertFalse(validate(saved), validate(saved))
+                store = CaseStore(Path(directory) / "cases.sqlite3")
+                case_id, version = store.save("Anchor editing", saved)
+                self.assertEqual(store.load(case_id, version), saved)
+                with page.expect_download() as download:
+                    page.click("#b_html")
+                exported = Path(directory) / "exported.html"
+                download.value.save_as(exported)
+                page.goto(exported.as_uri())
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0")
+                self.assertEqual(page.evaluate("window.__subsea.spec.connections"), saved["connections"])
+                self.assertTrue(page.evaluate("""()=>{const s=window.__subsea.scene3D.diagnostics();
+                    return s.routes.filter(r=>Number.isInteger(r.index)).every(r=>['from','to'].every(end=>
+                        JSON.stringify(r[end])===JSON.stringify(s.models.find(m=>m.id===r[end+'Id']).ports.find(p=>p.id===r[end+'Port']).point)));
+                }"""))
+                self.assertEqual(page.locator("#scene3d-error").text_content(), "")
+                self.assertFalse(errors, errors)
+            finally:
+                browser.close()
+
+    def test_anchor_editor_covers_pipeline_symbols_preset_risers_and_implicit_links(self):
+        spec = {"showLegend": False, "animate": False,
+                "host": {"id": "host", "type": "jacket", "slots": ["P", "S", "U"],
+                         "risers": [{"lane": lane, "slot": i, "style": "rigid"} for i, lane in enumerate(("P", "S", "U"))]},
+                "chain": [{"id": "line", "type": "pipeline_pip", "w": 300},
+                          {"id": "plet", "type": "plet"}, {"id": "valve", "type": "valve_gate"},
+                          {"id": "m1", "type": "manifold", "slots": 4}]}
+        with tempfile.TemporaryDirectory(prefix="subsea-anchor-preset-") as directory, sync_playwright() as pw:
+            browser = pw.chromium.launch(executable_path=browser_executable(), args=["--enable-unsafe-swiftshader"])
+            try:
+                page = browser.new_page(viewport={"width": 1600, "height": 1000})
+                path = Path(directory) / "preset.html"
+                path.write_text(build_html(spec), encoding="utf-8")
+                page.goto(path.as_uri())
+                page.click("#b_3d")
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0")
+                page.evaluate("window.__subsea.move3DEquipment('m1',160,70)")
+                page.click("#scene3d-anchor-mode")
+                source = page.evaluate("window.__subsea.getScene3D()")
+                equipment = page.evaluate("window.__subsea.scene3D.diagnostics().equipmentRoutes")
+                self.assertEqual({r["lane"] for r in equipment}, {"P", "S", "U"})
+                keys = [r["routeKey"] for r in source["routes"]] + [r["routeKey"] for r in equipment]
+                self.assertEqual(len(set(keys)), len(keys))
+                self.assertTrue(any(json.loads(k)[0] == "riser" for k in keys))
+                self.assertTrue(any(json.loads(k)[0] == "implicit" for k in keys))
+                self.assertTrue(any(json.loads(k)[0] == "bridge" for k in keys))
+                for i, key in enumerate(keys):
+                    page.locator("#scene3d-route").select_option(key)
+                    page.click("#scene3d-anchor-add")
+                    page.locator("#scene3d-anchor-y").fill(str(400 + i * 15))
+                    page.locator("#scene3d-anchor-y").press("Tab")
+                    self.assertEqual(len(page.evaluate("k=>window.__subsea.spec.routeAnchors3D[k]", key)), 1)
+                    self.assertEqual(page.locator("#scene3d-error").text_content(), "")
+                saved = page.evaluate("structuredClone(window.__subsea.spec)")
+                self.assertFalse(saved.get("connections"), "Editing preset/inline routes must not invent costing connections")
+                self.assertTrue(installation_list(saved).equals(installation_list(spec)))
+                store = CaseStore(Path(directory) / "cases.sqlite3")
+                case_id, version = store.save("Preset anchors", saved)
+                self.assertEqual(store.load(case_id, version), saved)
+                before = page.evaluate("window.__subsea.scene3D.diagnostics().equipmentRoutes")
+                page.evaluate("window.__subsea.move3DEquipment('line',100,50)")
+                page.wait_for_function("()=>window.__subsea.scene3D.diagnostics().models.find(m=>m.id==='line').position[0]===window.__subsea.getScene3D().nodes.find(n=>n.id==='line').box.cx*.08")
+                after = page.evaluate("window.__subsea.scene3D.diagnostics().equipmentRoutes")
+                for old, new in zip(before, after):
+                    self.assertEqual(old["anchors"], new["anchors"])
+                    for end in ("from", "to"):
+                        self.assertAlmostEqual(new[end][0] - old[end][0], 8)
+                        self.assertAlmostEqual(new[end][2] - old[end][2], 4)
+                current = page.evaluate("structuredClone(window.__subsea.spec)")
+                loaded = Path(directory) / "loaded.html"
+                loaded.write_text(build_html(current), encoding="utf-8")
+                page.goto(loaded.as_uri())
+                page.click("#b_3d")
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0")
+                self.assertEqual(page.evaluate("window.__subsea.spec.routeAnchors3D"), saved["routeAnchors3D"])
+                self.assertEqual(page.evaluate("window.__subsea.scene3D.diagnostics().equipmentRoutes"), after)
+                page.evaluate("""()=>{
+                    const s=structuredClone(window.__subsea.spec);s.host.risers.reverse();
+                    s.overrides.line.scale3D=.5;window.__subsea.replaceSpec(s);
+                }""")
+                page.wait_for_function("()=>window.__subsea.scene3D.diagnostics().models.find(m=>m.id==='line').scale3D===.5")
+                self.assertEqual(set(page.evaluate("window.__subsea.getScene3D().routes.map(r=>r.routeKey)")),
+                                 {r["routeKey"] for r in source["routes"]})
+                scaled = page.evaluate("window.__subsea.scene3D.diagnostics().equipmentRoutes")
+                center = page.evaluate("window.__subsea.scene3D.diagnostics().models.find(m=>m.id==='line').position")
+                for old, new in zip(after, scaled):
+                    self.assertEqual(old["anchors"], new["anchors"])
+                    for end in ("from", "to"):
+                        for axis in range(3):
+                            self.assertAlmostEqual(new[end][axis], center[axis] + (old[end][axis] - center[axis]) * .5)
+                page.click("#scene3d-anchor-mode")
+                key = equipment[0]["routeKey"]
+                page.locator("#scene3d-route").select_option(key)
+                page.click("#scene3d-anchor-remove")
+                remaining = page.evaluate("window.__subsea.spec.routeAnchors3D")
+                self.assertNotIn(key, remaining)
+                self.assertEqual(len(remaining), len(keys) - 1)
+                self.assertEqual(page.locator("#scene3d-error").text_content(), "")
+            finally:
+                browser.close()
+
+    def test_drag_connect_route_and_reconnect_all_three_lanes(self):
+        spec = {"freeform": True, "showLegend": False, "animate": False,
+                "chain": [{"id": "line", "type": "pipeline_rigid", "x": 80, "y": 120, "w": 240},
+                          {"id": "m1", "type": "manifold", "x": 600, "y": 180, "slots": 4},
+                          {"id": "m2", "type": "manifold", "x": 1000, "y": 450, "slots": 4}],
+                "overrides": {"m1": {"scale3D": .5}, "m2": {"scale3D": .75}}}
+        with tempfile.TemporaryDirectory(prefix="subsea-3d-connect-") as directory, sync_playwright() as pw:
+            browser = pw.chromium.launch(executable_path=browser_executable(), args=["--enable-unsafe-swiftshader"])
+            try:
+                page = browser.new_page(viewport={"width": 1600, "height": 1000})
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                path = Path(directory) / "connect.html"
+                path.write_text(build_html(spec), encoding="utf-8")
+                page.goto(path.as_uri())
+                page.click("#b_3d")
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0")
+                page.click("#scene3d-top")
+                page.click("#scene3d-connect")
+
+                def handle(**selector):
+                    handles = page.evaluate("window.__subsea.scene3D.diagnostics().connectionHandles")
+                    return next(h for h in handles if all(h.get(k) == v for k, v in selector.items()))
+
+                def location(h):
+                    canvas = page.locator("#scene3d canvas").bounding_box()
+                    return canvas["x"] + h["screen"]["x"], canvas["y"] + h["screen"]["y"]
+
+                def drag(start, end):
+                    page.mouse.move(*location(start))
+                    page.mouse.down()
+                    page.mouse.move(*location(end), steps=8)
+
+                def check_attachments():
+                    page.wait_for_function("""()=>{
+                        const scene=window.__subsea.scene3D.diagnostics();
+                        return scene.routes.filter(r=>Number.isInteger(r.index)).every(r=>
+                            ['from','to'].every(end=>{
+                                const m=scene.models.find(m=>m.id===r[end+'Id']);
+                                return JSON.stringify(r[end])===JSON.stringify(m.ports.find(p=>p.id===r[end+'Port']).point);
+                            }));
+                    }""")
+                    self.assertEqual(page.locator("#scene3d-error").text_content(), "")
+
+                for index, lane in enumerate(("P", "S", "U")):
+                    before = page.evaluate("structuredClone(window.__subsea.spec)")
+                    drag(handle(kind="port", id="line", port=f"{lane}-right"),
+                         handle(kind="port", id="m1", port=f"{lane}-left"))
+                    self.assertEqual(page.evaluate("window.__subsea.spec"), before, "Preview must not change the design")
+                    page.mouse.up()
+                    connections = page.evaluate("window.__subsea.spec.connections || []")
+                    self.assertEqual(len(connections), index + 1)
+                    self.assertEqual(connections[index], {"from": "line", "fromPort": f"{lane}-right", "to": "m1",
+                                                         "toPort": f"{lane}-left", "lane": lane,
+                                                         "style": "flex", "installationStatus": "New"})
+                    check_attachments()
+
+                before = page.evaluate("structuredClone(window.__subsea.spec)")
+                bend = handle(kind="bend", index=2)
+                x, y = location(bend)
+                page.mouse.move(x, y)
+                page.mouse.down()
+                page.mouse.move(x + 65, y + 100, steps=8)
+                self.assertEqual(page.evaluate("window.__subsea.spec"), before)
+                page.mouse.up()
+                waypoints = page.evaluate("window.__subsea.spec.connections[2].waypoints")
+                self.assertEqual(len(waypoints), 1)
+                self.assertNotEqual(waypoints[0], {"x": bend["point"][0] / .08, "y": bend["point"][2] / .08})
+                check_attachments()
+
+                drag(handle(kind="endpoint", index=2, end="to"), handle(kind="port", id="m2", port="U-left"))
+                page.mouse.up()
+                connection = page.evaluate("window.__subsea.spec.connections[2]")
+                self.assertEqual((connection["to"], connection["toPort"], connection["lane"]), ("m2", "U-left", "U"))
+                self.assertEqual(connection["waypoints"], waypoints)
+                check_attachments()
+                page.evaluate("window.__subsea.move3DEquipment('m2',120,70)")
+                page.wait_for_function("()=>window.__subsea.scene3D.diagnostics().models.find(m=>m.id==='m2').position[0]===window.__subsea.getScene3D().nodes.find(n=>n.id==='m2').box.cx*.08")
+                check_attachments()
+
+                def export_hashes():
+                    return page.evaluate("""async()=>{
+                        const viewer=window.__subsea.scene3D;
+                        const hash=async b=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',b)));
+                        return {png:await hash(await (await viewer.snapshot()).arrayBuffer()),
+                            svg:await hash(new TextEncoder().encode(viewer.svgSnapshot('Routing')))};
+                    }""")
+
+                with_handles = export_hashes()
+                page.click("#scene3d-orbit")
+                self.assertEqual(export_hashes(), with_handles, "Editing handles must not appear in PNG or SVG exports")
+                saved = page.evaluate("structuredClone(window.__subsea.spec)")
+                self.assertFalse(validate(saved), validate(saved))
+                reloaded = Path(directory) / "reloaded.html"
+                reloaded.write_text(build_html(saved), encoding="utf-8")
+                page.goto(reloaded.as_uri())
+                page.click("#b_3d")
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0")
+                self.assertEqual(page.evaluate("window.__subsea.spec.connections"), saved["connections"])
+                check_attachments()
+                self.assertFalse(errors, errors)
+            finally:
+                browser.close()
+
+    def test_drag_connection_rejects_mismatch_and_cancels_without_changes(self):
+        spec = {"freeform": True, "showLegend": False, "animate": False,
+                "chain": [{"id": "line", "type": "pipeline_rigid", "x": 80, "y": 120, "w": 240},
+                          {"id": "m1", "type": "manifold", "x": 600, "y": 250, "slots": 4}]}
+        with tempfile.TemporaryDirectory(prefix="subsea-3d-connect-cancel-") as directory, sync_playwright() as pw:
+            browser = pw.chromium.launch(executable_path=browser_executable(), args=["--enable-unsafe-swiftshader"])
+            try:
+                page = browser.new_page(viewport={"width": 1500, "height": 950})
+                path = Path(directory) / "cancel.html"
+                path.write_text(build_html(spec), encoding="utf-8")
+                page.goto(path.as_uri())
+                page.click("#b_3d")
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0")
+                page.click("#scene3d-top")
+                page.click("#scene3d-connect")
+                before = page.evaluate("structuredClone(window.__subsea.spec)")
+
+                def drag_to(port, cancel=False, lane="P"):
+                    handles = page.evaluate("window.__subsea.scene3D.diagnostics().connectionHandles")
+                    canvas = page.locator("#scene3d canvas").bounding_box()
+                    start = next(h for h in handles if h.get("id") == "line" and h.get("port") == f"{lane}-right")
+                    target = next(h for h in handles if h.get("id") == "m1" and h.get("port") == port)
+                    page.mouse.move(canvas["x"] + start["screen"]["x"], canvas["y"] + start["screen"]["y"])
+                    page.mouse.down()
+                    page.mouse.move(canvas["x"] + target["screen"]["x"], canvas["y"] + target["screen"]["y"], steps=8)
+                    if cancel == "pointer":
+                        page.locator("#scene3d canvas").dispatch_event("pointercancel", {"pointerId": 1})
+                    elif cancel:
+                        page.keyboard.press("Escape")
+                    page.mouse.up()
+
+                drag_to("U-left")
+                self.assertEqual(page.evaluate("window.__subsea.spec"), before)
+                self.assertIn("No connection made", page.locator("#scene3d-info").text_content())
+                drag_to("P-left", cancel=True)
+                self.assertEqual(page.evaluate("window.__subsea.spec"), before)
+                drag_to("P-left", cancel="pointer")
+                self.assertEqual(page.evaluate("window.__subsea.spec"), before)
+                drag_to("P-left")
+                connected = page.evaluate("structuredClone(window.__subsea.spec)")
+                self.assertEqual(len(connected["connections"]), 1)
+                drag_to("S-left", lane="S")
+                connected = page.evaluate("structuredClone(window.__subsea.spec)")
+                self.assertEqual(len(connected["connections"]), 2)
+                drag_to("P-left")
+                self.assertEqual(page.evaluate("window.__subsea.spec"), connected)
+                self.assertIn("already connected", page.locator("#scene3d-error").text_content())
+
+                bend = next(h for h in page.evaluate("window.__subsea.scene3D.diagnostics().connectionHandles") if h["kind"] == "bend")
+                canvas = page.locator("#scene3d canvas").bounding_box()
+                x, y = canvas["x"] + bend["screen"]["x"], canvas["y"] + bend["screen"]["y"]
+                routes = page.evaluate("window.__subsea.scene3D.diagnostics().routes")
+                page.mouse.move(x, y)
+                page.mouse.down()
+                page.mouse.move(x + 40, y + 60, steps=5)
+                page.keyboard.press("Escape")
+                page.mouse.up()
+                self.assertEqual(page.evaluate("window.__subsea.spec"), connected)
+                self.assertEqual(page.evaluate("window.__subsea.scene3D.diagnostics().routes"), routes)
+            finally:
+                browser.close()
+
+    def test_per_element_3d_size_controls_geometry_connections_and_persistence(self):
+        spec = design()
+        spec["animate"] = False
+        with tempfile.TemporaryDirectory(prefix="subsea-3d-size-") as directory, sync_playwright() as pw:
+            browser = pw.chromium.launch(executable_path=browser_executable(), args=["--enable-unsafe-swiftshader"])
+            try:
+                page = browser.new_page(viewport={"width": 1600, "height": 1000}, accept_downloads=True)
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                path = Path(directory) / "size.html"
+                path.write_text(build_html(spec), encoding="utf-8")
+                page.goto(path.as_uri())
+                page.wait_for_function("()=>!!window.__subsea")
+                page.click("#b_3d")
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0", timeout=30000)
+
+                def check_attachments():
+                    source = page.evaluate("window.__subsea.getScene3D()")
+                    scene = page.evaluate("window.__subsea.scene3D.diagnostics()")
+                    for binding in source["routes"]:
+                        route = next(r for r in scene["routes"] if r["index"] == binding["index"])
+                        for end in ("from", "to"):
+                            model = next(m for m in scene["models"] if m["id"] == binding[end])
+                            port_id = binding[end + "Port"]
+                            attached = next((p["deck"] for p in model["attachments"] if p["id"] == port_id), None)
+                            if attached is None:
+                                attached = next(p["point"] for p in model["ports"] if p["id"] == port_id)
+                            self.assertEqual(route[end], attached)
+                    host = next(m for m in scene["models"] if m["id"] == "host")
+                    self.assertEqual(scene["psvs"], [next(p["deck"] for p in host["attachments"] if p["id"] == "J-0")])
+                    self.assertEqual(page.locator("#scene3d-error").text_content(), "")
+
+                for item_id, percent in (("host", 50), ("custom", 150), ("tree", 10)):
+                    page.click("#b_2d")
+                    page.locator("#svg").click(position={"x": 5, "y": 5})
+                    page.locator(f'#content .el[data-id="{item_id}"] .hit').click(force=True)
+                    page.click("#b_3d")
+                    self.assertEqual(page.evaluate("window.__subsea.sel"), item_id)
+                    before = next(m for m in page.evaluate("window.__subsea.scene3D.diagnostics().models") if m["id"] == item_id)
+                    geometry = page.evaluate("window.__subsea.getScene3D().nodes.map(n=>({id:n.id,box:n.box,ports:n.ports,pipes:n.pipes}))")
+                    page.locator("#i_scale3d").fill(str(percent))
+                    page.locator("#i_scale3d").press("Tab")
+                    page.wait_for_function("p=>window.__subsea.scene3D.diagnostics().models.find(m=>m.id===p.id).scale3D===p.factor || document.querySelector('#scene3d-error').textContent",
+                                           arg={"id": item_id, "factor": percent / 100})
+                    self.assertEqual(page.locator("#scene3d-error").text_content(), "")
+                    current = next(m for m in page.evaluate("window.__subsea.scene3D.diagnostics().models") if m["id"] == item_id)
+                    self.assertEqual(current["position"], before["position"])
+                    for axis in range(3):
+                        for edge in ("min", "max"):
+                            expected = before["position"][axis] + (before["bounds"][edge][axis] - before["position"][axis]) * percent / 100
+                            self.assertAlmostEqual(current["bounds"][edge][axis], expected, places=5)
+                    check_attachments()
+                    self.assertEqual(page.evaluate("window.__subsea.getScene3D().nodes.map(n=>({id:n.id,box:n.box,ports:n.ports,pipes:n.pipes}))"), geometry)
+                self.assertEqual(page.evaluate("window.__subsea.spec.chain"), spec["chain"])
+                self.assertEqual(page.evaluate("window.__subsea.spec.connections"), spec["connections"])
+                page.locator("#i_scale3d").fill("0")
+                page.locator("#i_scale3d").press("Tab")
+                self.assertEqual(page.evaluate("window.__subsea.spec.overrides.tree.scale3D"), .1)
+                page.locator("#i_scale3d").fill("1")
+                page.locator("#i_scale3d").press("Tab")
+                page.wait_for_function("()=>window.__subsea.scene3D.diagnostics().models.find(m=>m.id==='tree').scale3D===.01")
+                check_attachments()
+                page.click("#i_3d_larger")
+                page.wait_for_function("()=>window.__subsea.scene3D.diagnostics().models.find(m=>m.id==='tree').scale3D===.11")
+                page.click("#i_3d_smaller")
+                page.wait_for_function("()=>window.__subsea.scene3D.diagnostics().models.find(m=>m.id==='tree').scale3D===.01")
+                page.click("#i_3d_reset")
+                page.wait_for_function("()=>window.__subsea.scene3D.diagnostics().models.find(m=>m.id==='tree').scale3D===1")
+                page.evaluate("window.__subsea.move3DEquipment('custom',45,30)")
+                page.wait_for_function("()=>window.__subsea.scene3D.diagnostics().models.find(m=>m.id==='custom').position[0]===window.__subsea.getScene3D().nodes.find(n=>n.id==='custom').box.cx*.08")
+                check_attachments()
+                saved = page.evaluate("structuredClone(window.__subsea.spec)")
+                self.assertTrue(installation_list(saved).equals(installation_list(spec)))
+                store = CaseStore(Path(directory) / "cases.sqlite3")
+                case_id, version = store.save("Independent 3D size", saved)
+                self.assertEqual(store.load(case_id, version), saved)
+                with page.expect_download() as download:
+                    page.click("#b_html")
+                exported = Path(directory) / "resized.html"
+                download.value.save_as(exported)
+                page.goto(exported.as_uri())
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0", timeout=30000)
+                self.assertEqual(page.evaluate("window.__subsea.spec"), saved)
+                sizes = {m["id"]: m["scale3D"] for m in page.evaluate("window.__subsea.scene3D.diagnostics().models")}
+                self.assertEqual(sizes, {"host": .5, "custom": 1.5, "tree": 1})
+                check_attachments()
+                self.assertFalse(errors, errors)
+            finally:
+                browser.close()
+
+    def test_3d_size_preserves_inline_schematic_piping(self):
+        spec = {"animate": False, "showLegend": False, "chain": [
+            {"id": "line", "type": "pipeline_pip", "w": 240},
+            {"id": "template", "type": "template", "wells": 4}],
+            "overrides": {"template": {"scale3D": .25}}}
+        with tempfile.TemporaryDirectory(prefix="subsea-3d-inline-size-") as directory, sync_playwright() as pw:
+            browser = pw.chromium.launch(executable_path=browser_executable(), args=["--enable-unsafe-swiftshader"])
+            try:
+                page = browser.new_page()
+                path = Path(directory) / "inline.html"
+                path.write_text(build_html(spec), encoding="utf-8")
+                page.goto(path.as_uri())
+                page.click("#b_3d")
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0", timeout=30000)
+                scene = page.evaluate("window.__subsea.scene3D.diagnostics()")
+                bridges = [r for r in scene["routes"] if r["autoBridge"]]
+                self.assertEqual({r["lane"] for r in bridges}, {"P", "S", "U"})
+                for route in bridges:
+                    for end in ("from", "to"):
+                        model = next(m for m in scene["models"] if m["id"] == route[end + "Id"])
+                        self.assertEqual(route[end], next(p["point"] for p in model["ports"] if p["id"] == route[end + "Port"]))
+                self.assertEqual(page.locator("#scene3d-error").text_content(), "")
+            finally:
+                browser.close()
+
+    def test_ship_shaped_fpso_and_turret_attachments(self):
+        spec = get_preset("Single template to FPSO")
+        spec["animate"] = False
+        spec["host"].update({"id": "host", "slots": ["Production", "Control"]})
+        spec["host"]["risers"][0]["psv"] = True
+        spec["host"]["risers"][1]["slot"] = 1
+        with tempfile.TemporaryDirectory(prefix="subsea-fpso-") as directory, sync_playwright() as pw:
+            browser = pw.chromium.launch(executable_path=browser_executable(), args=["--enable-unsafe-swiftshader"])
+            try:
+                page = browser.new_page(viewport={"width": 1500, "height": 1000}, accept_downloads=True)
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                path = Path(directory) / "fpso.html"
+                path.write_text(build_html(spec), encoding="utf-8")
+                page.goto(path.as_uri())
+                page.wait_for_function("()=>!!window.__subsea")
+                for part in ("hull", "accommodation", "crane", "helideck", "turret"):
+                    self.assertEqual(page.locator(f'#content .fpso-{part}').count(), 1)
+                page.click("#b_3d")
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0", timeout=30000)
+
+                def check_turret():
+                    source = page.evaluate("window.__subsea.getScene3D()")
+                    page.wait_for_function("""source=>{
+                        const model=window.__subsea.scene3D.diagnostics().models.find(n=>n.id==='host');
+                        const host=source.nodes.find(n=>n.id==='host');
+                        return Math.abs(model.position[0]-host.box.cx*.08)<1e-6
+                            && Math.abs(model.position[2]-host.box.cy*.08)<1e-6;
+                    }""", arg=source)
+                    scene = page.evaluate("window.__subsea.scene3D.diagnostics()")
+                    host = next(n for n in scene["models"] if n["id"] == "host")
+                    ship = host["vessel"]
+                    self.assertEqual(ship["processModules"], 4)
+                    self.assertEqual(ship["helidecks"], 1)
+                    self.assertEqual(ship["moorings"], 6)
+                    self.assertGreater(ship["windows"], 20)
+                    self.assertGreater(ship["craneMembers"], 20)
+                    self.assertGreater(ship["hullColor"][0], ship["hullColor"][1] * 2)
+                    rings = [ship["hullVertices"][start:start + 24] for start in range(0, len(ship["hullVertices"]), 24)]
+                    widths = [max(r[2::3]) - min(r[2::3]) for r in rings]
+                    self.assertLess(widths[-1], max(widths) * .1)
+                    self.assertLess(widths[0], max(widths) * .8)
+                    self.assertGreater(max(rings[2][1::3]) - min(rings[2][1::3]), 1)
+                    self.assertEqual(scene["psvs"], [next(a["deck"] for a in host["attachments"] if a["id"] == "J-0")])
+                    self.assertGreater(scene["psvs"][0][1], host["position"][1] + max(rings[2][1::3]))
+                    bindings = [r for r in source["routes"] if r.get("from") == "host"]
+                    self.assertEqual(len(bindings), 2)
+                    for binding in bindings:
+                        route = next(r for r in scene["routes"] if r["fromId"] == "host" and r["fromPort"] == binding["fromPort"])
+                        deck = next(a["deck"] for a in host["attachments"] if a["id"] == binding["fromPort"])
+                        self.assertEqual(route["from"], deck)
+                        self.assertAlmostEqual(deck[0], ship["turret"][0])
+                        self.assertAlmostEqual(deck[1], ship["turret"][1])
+                        self.assertLess(abs(deck[2] - ship["turret"][2]), ship["turretRadius"])
+                    return host
+
+                initial = check_turret()
+                page.evaluate("window.__subsea.move3DEquipment('host',90,35)")
+                moved = check_turret()
+                self.assertAlmostEqual(moved["position"][0] - initial["position"][0], 90 * .08)
+                changed = page.evaluate("structuredClone(window.__subsea.spec)")
+                changed["overrides"]["host"]["scale"] = 1.3
+                changed["branches"] = [{"id": "mirrored", "mirror": True, "host": changed["host"],
+                                        "chain": changed["chain"], "lanes": changed["lanes"]}]
+                changed.update({"host": None, "chain": [], "zones": []})
+                page.evaluate("s=>window.__subsea.replaceSpec(s)", changed)
+                mirrored = check_turret()
+                self.assertTrue(page.evaluate("window.__subsea.getScene3D().nodes.find(n=>n.id==='host').mirrored"))
+                self.assertGreater(mirrored["deckWidth"], initial["deckWidth"] * 1.25)
+                self.assertLess(mirrored["vessel"]["turret"][0], mirrored["position"][0])
+                vector = page.evaluate("window.__subsea.scene3D.svgSnapshot('Mirrored FPSO')")
+                self.assertGreater(len(ET.fromstring(vector).findall("{http://www.w3.org/2000/svg}path")), 100)
+                self.assertNotIn("NaN", vector)
+                with page.expect_download() as download:
+                    page.click("#b_html")
+                exported = Path(directory) / "export.html"
+                download.value.save_as(exported)
+                page.goto(exported.as_uri())
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0", timeout=30000)
+                self.assertEqual(page.evaluate("window.__subsea.spec"), changed)
+                check_turret()
+                self.assertEqual(page.locator("#scene3d-error").text_content(), "")
+                self.assertFalse(errors, errors)
+            finally:
+                browser.close()
+
+    def test_four_slot_jackup_preset_guided_risers(self):
+        spec = get_preset("Single 4-slot template to jackup")
+        with tempfile.TemporaryDirectory(prefix="subsea-jackup-") as directory, sync_playwright() as pw:
+            browser = pw.chromium.launch(executable_path=browser_executable(), args=["--enable-unsafe-swiftshader"])
+            try:
+                page = browser.new_page(viewport={"width": 1500, "height": 1000})
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                path = Path(directory) / "jackup.html"
+                path.write_text(build_html(spec), encoding="utf-8")
+                page.goto(path.as_uri())
+                page.wait_for_function("()=>!!window.__subsea")
+                self.assertEqual(page.locator('#content .jackup-leg').count(), 3)
+                self.assertEqual(page.locator('#content .jackup-spudcan').count(), 3)
+                self.assertEqual(page.locator('#content .el[data-type="template"]').count(), 1)
+                from test_hosts import assert_risers_attached
+                assert_risers_attached(page)
+                page.click("#b_3d")
+                page.wait_for_function("()=>window.__subsea.scene3D?.diagnostics().drawCalls>0", timeout=30000)
+                scene = page.evaluate("window.__subsea.scene3D.diagnostics()")
+                host = next(n for n in scene["models"] if n["id"] == "jackup")
+                self.assertEqual(host["spudcans"], 3)
+                self.assertEqual(len(host["legCenters"]), 3)
+                self.assertEqual(host["guides"], 3)
+                self.assertEqual(host["brackets"], 9)
+                self.assertEqual(len([s for s in host["structure"] if s["name"] == "Jackup leg chord"]), 9)
+                for leg in host["structure"]:
+                    if leg["name"] == "Jackup leg chord":
+                        self.assertAlmostEqual(leg["ends"][0][0], leg["ends"][1][0])
+                        self.assertAlmostEqual(leg["ends"][0][2], leg["ends"][1][2])
+                routes = [r for r in scene["routes"] if r["fromId"] == "jackup"]
+                self.assertEqual({r["lane"] for r in routes}, {"P", "S", "U"})
+                changed = json.loads(json.dumps(spec))
+                changed["host"]["showJTubes"] = False
+                for riser in changed["host"]["risers"]:
+                    riser["style"] = "flex"
+                page.evaluate("s=>window.__subsea.replaceSpec(s)", changed)
+                current = page.evaluate("window.__subsea.scene3D.diagnostics()")
+                for old in routes:
+                    new = next(r for r in current["routes"] if r["fromId"] == "jackup" and r["fromPort"] == old["fromPort"])
+                    self.assertEqual(old["points"], new["points"], "Fixed jackup must not develop floating catenaries")
+                changed["branches"] = [{"id": "mirrored", "mirror": True, "host": changed["host"],
+                                        "chain": changed["chain"], "lanes": changed["lanes"]}]
+                changed.update({"host": None, "chain": []})
+                changed["overrides"] = {"jackup": {"scale": 1.2, "dx": 60, "dy": 25}}
+                page.evaluate("s=>window.__subsea.replaceSpec(s)", changed)
+                current = page.evaluate("window.__subsea.scene3D.diagnostics()")
+                host = next(n for n in current["models"] if n["id"] == "jackup")
+                source = page.evaluate("window.__subsea.getScene3D()")
+                for binding in (r for r in source["routes"] if r.get("from") == "jackup"):
+                    route = next(r for r in current["routes"] if r["fromId"] == "jackup" and r["fromPort"] == binding["fromPort"])
+                    self.assertEqual(route["from"], next(a["deck"] for a in host["attachments"] if a["id"] == binding["fromPort"]))
+                self.assertTrue(next(n for n in source["nodes"] if n["id"] == "jackup")["mirrored"])
+                self.assertEqual(page.evaluate("window.__subsea.spec.branches[0].chain"), spec["chain"])
+                self.assertEqual(page.locator("#scene3d-error").text_content(), "")
+                self.assertFalse(errors, errors)
+            finally:
+                browser.close()
+
     def test_inline_piping_follows_drag_preview_commit_and_reload(self):
+        self._check_inline_piping_follows_drag("template")
+
+    def test_manifold_service_and_umbilical_follow_scaled_drag(self):
+        self._check_inline_piping_follows_drag("manifold", .3)
+
+    def _check_inline_piping_follows_drag(self, equipment_type, factor=1):
         spec = {"showLegend": False, "flow": "none", "animate": False,
                 "host": {"id": "host", "type": "jacket", "slots": ["Production"],
                          "risers": [{"lane": "P", "slot": 0, "style": "rigid", "psv": True}]},
                 "chain": [{"id": "line", "type": "pipeline_pip", "w": 240},
-                          {"id": "template", "type": "template", "wells": 2}]}
+                          {"id": "template", "type": equipment_type, "wells": 2, "slots": 6}],
+                "overrides": {"template": {"scale": .9, "scale3D": factor}}}
         with tempfile.TemporaryDirectory(prefix="subsea-3d-follow-") as directory, sync_playwright() as pw:
             browser = pw.chromium.launch(executable_path=browser_executable(), args=["--enable-unsafe-swiftshader"])
             try:
@@ -61,10 +678,14 @@ class ThreeDTests(unittest.TestCase):
                     if not preview:
                         page.wait_for_function("""source=>{
                             const models=window.__subsea.scene3D.diagnostics().models;
-                            return source.nodes.filter(n=>!n.topside).every(n=>n.ports.every(p=>{
-                                const actual=models.find(m=>m.id===n.id)?.ports.find(q=>q.id===p.id)?.point;
-                                return actual && Math.abs(actual[0]-p.x*.08)<1e-7 && Math.abs(actual[2]-p.y*.08)<1e-7;
-                            })) || document.querySelector('#scene3d-error').textContent;
+                            return source.nodes.filter(n=>!n.topside).every(n=>{
+                                const model=models.find(m=>m.id===n.id);
+                                return model && n.ports.every(p=>{
+                                    const actual=model.ports.find(q=>q.id===p.id)?.point;
+                                    return actual && [0,2].every((axis,i)=>Math.abs(actual[axis]-
+                                        (model.position[axis]+(([p.x,p.y][i]*.08)-model.position[axis])*model.scale3D))<1e-7);
+                                });
+                            }) || document.querySelector('#scene3d-error').textContent;
                         }""", arg=source)
                     self.assertEqual(page.locator("#scene3d-error").text_content(), "")
                     scene = page.evaluate("window.__subsea.scene3D.diagnostics()")

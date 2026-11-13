@@ -406,7 +406,7 @@
     return s;
   }
   NODE.template = { uses: 'PSU', w: (n) => PAD + (n.hipps === false ? 0 : HW) + Math.max(1, Math.ceil(num(n.wells, 4) / 2)) * COLW + PAD + 4, draw: (c, n) => headerStructure(c, n, 'template') };
-  NODE.manifold = { uses: 'P', w: (n) => PAD + Math.ceil(num(n.slots, 4) / 2) * COLW + PAD + 4, draw: (c, n) => headerStructure(c, n, 'manifold') };
+  NODE.manifold = { uses: 'PSU', w: (n) => PAD + Math.ceil(num(n.slots, 4) / 2) * COLW + PAD + 4, draw: (c, n) => headerStructure(c, n, 'manifold') };
 
   NODE.satellite_well = {
     uses: 'P', w: () => 76,
@@ -807,20 +807,89 @@
   }
   HOSTS.jacket = { h: 245, draw: (o) => jacketDraw(o, 5, 245, 56, 112, 112) };
   HOSTS.platform = { h: 175, draw: (o) => jacketDraw(o, 3, 175, 40, 78, 84) };
+  HOSTS.jackup = {
+    h: 245,
+    draw({ x, top, spec }) {
+      let s = '';
+      for (const [index, offset] of [24, 80, 136].entries()) {
+        const legX = x + offset, bottom = top + 242;
+        let leg = rect(legX - 6, top - 48, 12, 290, { fill: T.paper, w: 1.4 });
+        for (let level = 0; level < 10; level++) {
+          const y = top - 48 + level * 29;
+          leg += line(legX - 6, y, legX + 6, y + 29, { w: .65 })
+            + line(legX + 6, y, legX - 6, y + 29, { w: .65 });
+        }
+        s += `<g class="jackup-leg" data-leg="${index}">${leg}</g>`
+          + `<g class="jackup-spudcan">${path(`M${legX - 16} ${bottom}H${legX + 16}L${legX + 10} ${bottom + 7}H${legX - 10}Z`, { fill: T.soft })}</g>`;
+      }
+      s += rect(x + 5, top, 150, 22, { fill: T.soft, w: 1.6 })
+        + rect(x + 10, top - 26, 40, 26, { fill: T.paper })
+        + rect(x + 8, top - 30, 44, 5, { fill: T.soft });
+      for (let i = 0; i < 4; i++) s += rect(x + 14 + i * 8, top - 19, 5, 6, { fill: T.mute, w: .5 });
+      s += `<g class="jackup-cantilever">${rect(x + 130, top - 3, 74, 9, { fill: T.soft })}`
+        + path(`M${x + 150} ${top - 4}L${x + 168} ${top - 91}H${x + 175}L${x + 191} ${top - 4}Z`, { fill: T.paper });
+      for (let level = 0; level < 6; level++) {
+        const y0 = top - 4 - level * 14, y1 = y0 - 14;
+        const left0 = x + 150 + level * 3, right0 = x + 191 - level * 2.5;
+        s += line(left0, y0, right0 - 2.5, y1, { w: .65 })
+          + line(right0, y0, left0 + 3, y1, { w: .65 });
+      }
+      s += '</g>';
+      if (!spec.showJTubes) s += slotHeader(spec, x + 60, top + 15, 20);
+      const gap = Math.min(20, 100 / Math.max(1, slotsOf(spec).length - 1));
+      const anchors = slotsOf(spec).map((_, i) => ({
+        x: x + 80 + (i - (slotsOf(spec).length - 1) / 2) * gap, y: top + 22,
+      }));
+      return { svg: s, w: 220, anchors };
+    },
+  };
 
   function waterLine(x, w, y) { return path(`M${x} ${y}` + Array.from({ length: Math.ceil(w / 16) }, () => 'q4 -4 8 0 q4 4 8 0').join(' '), { c: '#6aa5d8', w: 1.1 }); }
 
   HOSTS.fpso = {
-    h: 235,
+    h: 260,
     draw({ x, top, spec }) {
-      const wl = top + 70;
-      let s = waterLine(x, 190, wl);
-      s += path(`M${x + 6} ${wl - 30}H${x + 168}L${x + 188} ${wl - 18}L${x + 168} ${wl + 24}H${x + 22}Q${x + 6} ${wl + 24} ${x + 6} ${wl + 6}Z`, { fill: T.paper, w: 1.6 });
-      s += rect(x + 24, wl - 52, 42, 22, { fill: T.paper }) + rect(x + 72, wl - 46, 30, 16, { fill: T.paper }) + line(x + 140, wl - 30, x + 140, wl - 66, { w: 1.4 }) + path(`M${x + 140} ${wl - 66}q4 -6 0 -10`, { c: PC(), w: 1.2 });
-      s += circ(x + 120, wl - 2, 8, { fill: T.paper });
-      s += slotHeader(spec, x + 114, wl - 14, 0);
-      const anchors = slotsOf(spec).map((_, i) => ({ x: x + 120 + (i - (slotsOf(spec).length - 1) / 2) * 12, y: wl + 24 }));
-      return { svg: s, w: 200, anchors };
+      const wl = top + 110, deck = wl - 25;
+      const hull = ['mono', 'blueprint'].includes(CUR_SPEC.themeName) ? T.soft : '#a83223';
+      let s = `<g class="fpso-hull">${path(`M${x + 8} ${deck}H${x + 285}L${x + 316} ${deck - 13}H${x + 347}`
+        + `L${x + 329} ${wl + 18}Q${x + 323} ${wl + 29} ${x + 303} ${wl + 29}H${x + 40}`
+        + `Q${x + 12} ${wl + 24} ${x + 8} ${wl + 8}Z`, { fill: hull, w: 1.5 })}`
+        + line(x + 18, wl + 12, x + 323, wl + 12, { c: T.mute, w: .8 }) + '</g>';
+      s += waterLine(x, 350, wl + 8);
+      for (let module = 0; module < 4; module++) {
+        const mx = x + 55 + module * 43;
+        s += `<g class="fpso-process-module">${rect(mx, deck - 25, 35, 25, { fill: T.soft })}`
+          + rect(mx - 2, deck - 28, 39, 4, { fill: T.mute, w: .6 });
+        for (let level = 0; level < 3; level++) s += line(mx, deck - 7 - level * 7, mx + 35, deck - 7 - level * 7, { c: T.mute, w: .5 });
+        s += '</g>';
+      }
+      s += line(x + 48, deck - 4, x + 232, deck - 4, { w: 2 })
+        + line(x + 48, deck - 9, x + 232, deck - 9, { c: T.mute, w: 1 });
+      s += `<g class="fpso-accommodation">${rect(x + 260, deck - 51, 41, 51, { fill: T.paper })}`
+        + rect(x + 253, deck - 60, 53, 12, { fill: T.paper });
+      for (let row = 0; row < 4; row++) for (let column = 0; column < 4; column++) {
+        s += rect(x + 264 + column * 9, deck - 43 + row * 11, 5, 5, { fill: T.mute, w: .4 });
+      }
+      s += line(x + 279, deck - 60, x + 279, deck - 82, { w: 1.1 })
+        + line(x + 273, deck - 73, x + 286, deck - 73, { w: .7 }) + '</g>';
+      s += `<g class="fpso-helideck">${rect(x + 302, deck - 58, 46, 5, { fill: T.soft })}`
+        + line(x + 311, deck - 53, x + 305, deck - 15, { w: 1 })
+        + line(x + 337, deck - 53, x + 329, deck - 20, { w: 1 }) + '</g>';
+      s += `<g class="fpso-crane">${rect(x + 31, deck - 17, 15, 17, { fill: T.soft })}`
+        + path(`M${x + 35} ${deck - 17}L${x + 13} ${top + 8}L${x + 19} ${top + 6}L${x + 43} ${deck - 17}Z`, { fill: T.paper });
+      for (let level = 0; level < 7; level++) {
+        const y = deck - 19 - level * 10, xx = x + 35 - level * 2.7;
+        s += line(xx, y, xx + 4, y - 10, { w: .65 });
+      }
+      s += line(x + 13, top + 8, x + 13, deck - 8, { c: T.mute, w: .7 }) + '</g>';
+      for (const stack of [100, 203]) s += rect(x + stack, deck - 48, 6, 20, { fill: T.mute }) + rect(x + stack - 1, deck - 51, 8, 4, { fill: T.ink });
+      s += `<g class="fpso-turret">${rect(x + 235, wl + 23, 24, 17, { rx: 5, fill: T.soft })}`
+        + line(x + 229, wl + 33, x + 265, wl + 33, { w: 2 }) + '</g>';
+      const gap = Math.min(10, 40 / Math.max(1, slotsOf(spec).length - 1));
+      const anchors = slotsOf(spec).map((_, i) => ({
+        x: x + 247 + (i - (slotsOf(spec).length - 1) / 2) * gap, y: wl + 40,
+      }));
+      return { svg: s, w: 360, anchors };
     },
   };
   HOSTS.semisub = {
@@ -1033,7 +1102,7 @@
   function hostSymbol(type, item, x, L, act) {
     const host = HOSTS[type];
     const drawing = host.draw({ x, top: L.U + 16 - host.h, spec: item, L });
-    if (['jacket', 'platform', 'fpso', 'semisub', 'tlp', 'spar'].includes(type) && item.label) {
+    if (['jacket', 'platform', 'jackup', 'fpso', 'semisub', 'tlp', 'spar'].includes(type) && item.label) {
       drawing.svg += elementLabel(x + drawing.w / 2, L.U + 16 - host.h - 18, item.label, item, { size: 11, bold: true });
     }
     if (CUR_SPEC.professionalAppearance && item.tag && !drawing.svg.includes('class="equipment-tag"')) {
@@ -1041,12 +1110,12 @@
       drawing.svg += `<g class="equipment-tag">${txt(x + drawing.w / 2, L.U + 16 - host.h - 8,
         item.tag, { size: 7.5 / scale, font: SANS, c: T.mute })}</g>`;
     }
-    if (item.showJTubes && ['jacket', 'platform'].includes(type)) {
+    if (item.showJTubes && ['jacket', 'platform', 'jackup'].includes(type)) {
       const direction = item.jTubeSide === 'right' ? 1 : -1;
       const count = drawing.anchors.length, spacing = Math.min(8, 40 / Math.max(1, count - 1));
-      const center = x + 70, seabed = L.U + 16;
+      const center = x + (type === 'jackup' ? 80 : 70), seabed = L.U + 16;
       const top = seabed - host.h + 22;
-      const baseHalf = type === 'jacket' ? 56 : 39;
+      const baseHalf = type === 'jacket' ? 56 : type === 'jackup' ? 65 : 39;
       drawing.anchors = drawing.anchors.map((deck, index) => {
         const vertical = center + (index - (count - 1) / 2) * spacing;
         const bottom = seabed - 8 - (direction < 0 ? count - 1 - index : index) * spacing;
@@ -2863,6 +2932,9 @@
       insp.style.display = 'block';
       insp.innerHTML = `<b>${esc(m.name)}</b> <small>${esc(st.sel)}</small>`
         + '<p><small>Changes update automatically when you leave a field. Save a case version to keep your work.</small></p>'
+        + `<label>3D size (%) <input id="i_scale3d" type="number" required min="1" step="any" value="${(o.scale3D === undefined ? 1 : o.scale3D) * 100}"></label>`
+        + '<div class="size-actions"><button id="i_3d_smaller">3D smaller</button><button id="i_3d_larger">3D larger</button><button id="i_3d_reset">Reset 3D size</button></div>'
+        + '<small>3D size only: uniformly scales this model, including its height. Connected lines follow. The 2D drawing and costing quantities are unchanged.</small>'
         + '<div id="i_valve_section"></div>'
         + `<label>Label <input id="i_lab" value="${esc(o.label !== undefined ? o.label : (item.label || ''))}"></label>`
         + labelStyleControls(item)
@@ -2899,8 +2971,8 @@
             + '<small>Hides S-left and brings chemical service to an internal U-left junction. Connect U-left to one J-tube with an umbilical riser. Disconnect existing S-left lines first. Bundled services are not fluid mixing.</small>'
             + '<small>Adds S and/or U inlet/outlet pairs alongside process ports. Connected ports cannot be disabled.</small>' : '')
         + (HOSTS[item.type] ? `<label>Available J-tubes <input id="i_jtube_count" type="number" min="0" max="${EQUIPMENT_OPTIONS.maxPorts}" step="1" required value="${slotsOf(item).length}"></label>` : '')
-        + (['jacket', 'platform'].includes(item.type) ? `<label>Draw J-tubes with pulled-in risers <input id="i_show_jtubes" type="checkbox"${item.showJTubes ? ' checked' : ''}></label><small>Draws guide-tube walls and the attached riser inside, up to deck level. Schematic only, not a clearance or bend-radius check.</small>` : '')
-        + (['jacket', 'platform'].includes(item.type) ? `<label>J-tube seabed exit <select id="i_jtube_side"><option value="left"${item.jTubeSide !== 'right' ? ' selected' : ''}>Left</option><option value="right"${item.jTubeSide === 'right' ? ' selected' : ''}>Right</option></select></label>` : '')
+        + (['jacket', 'platform', 'jackup'].includes(item.type) ? `<label>Draw J-tubes with pulled-in risers <input id="i_show_jtubes" type="checkbox"${item.showJTubes ? ' checked' : ''}></label><small>Draws guide-tube walls and the attached riser inside, up to deck level. Schematic only, not a clearance or bend-radius check.</small>` : '')
+        + (['jacket', 'platform', 'jackup'].includes(item.type) ? `<label>J-tube seabed exit <select id="i_jtube_side"><option value="left"${item.jTubeSide !== 'right' ? ' selected' : ''}>Left</option><option value="right"${item.jTubeSide === 'right' ? ' selected' : ''}>Right</option></select></label>` : '')
         + (item.type === 'template' ? `<label>Include HIPPS <input id="i_hipps" type="checkbox"${item.hipps !== false ? ' checked' : ''}></label>`
           + `<label>Well count <input id="i_wells" type="number" min="0" max="24" step="1" required value="${num(item.wells, 4)}"></label>`
           + `<label>Xmas tree type <select id="i_tree"><option value="">Existing well slots</option>${Object.entries(EQUIPMENT_OPTIONS.treeTypes).map(([id, name]) =>
@@ -3123,7 +3195,7 @@
         }
         if (item.type === 'plet') candidate.pletPorts = insp.querySelector('#i_plet_ports').value;
         if (HOSTS[item.type]) {
-          if (['jacket', 'platform'].includes(item.type)) {
+          if (['jacket', 'platform', 'jackup'].includes(item.type)) {
             candidate.showJTubes = insp.querySelector('#i_show_jtubes').checked;
             candidate.jTubeSide = insp.querySelector('#i_jtube_side').value;
           }
@@ -3239,19 +3311,25 @@
         input.addEventListener('change', saveOptions);
       }
       insp.querySelector('#i_route_rows')?.addEventListener('change', saveOptions);
-      const resize = (percent) => {
-        const input = insp.querySelector('#i_scale');
+      const resize = (percent, field = 'scale') => {
+        const input = insp.querySelector(field === 'scale3D' ? '#i_scale3d' : '#i_scale');
         input.value = percent;
         if (!input.reportValidity()) return;
         const oo = st.spec.overrides[sid] || (st.spec.overrides[sid] = {});
-        oo.scale = input.valueAsNumber / 100;
-        render(true);
+        oo[field] = input.valueAsNumber / 100;
+        if (field === 'scale3D') notifyChange();
+        else render(true);
         fillInsp();
       };
       insp.querySelector('#i_scale').onchange = (e) => resize(e.target.value);
       insp.querySelector('#i_smaller').onclick = () => resize(Math.max(1, Math.round(componentScale(o) * 10000) / 100 - 10));
       insp.querySelector('#i_larger').onclick = () => resize(Math.round(componentScale(o) * 10000) / 100 + 10);
       insp.querySelector('#i_size_reset').onclick = () => resize(100);
+      const size3D = (o.scale3D === undefined ? 1 : o.scale3D) * 100;
+      insp.querySelector('#i_scale3d').onchange = (e) => resize(e.target.value, 'scale3D');
+      insp.querySelector('#i_3d_smaller').onclick = () => resize(Math.max(1, size3D - 10), 'scale3D');
+      insp.querySelector('#i_3d_larger').onclick = () => resize(size3D + 10, 'scale3D');
+      insp.querySelector('#i_3d_reset').onclick = () => resize(100, 'scale3D');
       if (!st.spec.freeform) { insp.querySelector('#i_dx').onchange = upd; insp.querySelector('#i_dy').onchange = upd; }
       insp.querySelector('#i_copy').onclick = copySelected;
       insp.querySelector('#i_delete').onclick = removeSelected;
@@ -3630,6 +3708,10 @@
           const p = canvasPoint(detail, 0, 0), x = canvasPoint(detail, 1, 0), y = canvasPoint(detail, 0, 1);
           detailOrigin = { x: p.x, y: p.y, scaleX: x.x - p.x, scaleY: y.y - p.y };
         }
+        for (const pipe of pipeData) {
+          pipe.routeKey = JSON.stringify(['pipe', id, pipe.id]);
+          pipe.anchors3D = st.spec.routeAnchors3D?.[pipe.routeKey];
+        }
         const ports = portsFor(element).map((port) => {
           if (!port.tubeMouth) return port;
           const bore = element.querySelector(`.j-tube-guide[data-tube="${/^J-(\d+)$/.exec(port.id)?.[1]}"] .j-tube-bore`);
@@ -3644,6 +3726,7 @@
           return { id: port.dataset.port, lane: port.dataset.lane, x: point.x, y: point.y };
         });
         return { id, type: item.type, name: byId[item.type]?.name || item.type, item,
+          scale3D: override.scale3D === undefined ? 1 : override.scale3D,
           mirrored: !!element.closest('.train.mir'), schematic: !st.spec.freeform,
           train: train.dataset.train, chainIndex: findItem(id).index, nominalPorts,
           customSymbol: (st.spec.customSymbols || []).find((symbol) => symbol.id === item.type),
@@ -3665,7 +3748,7 @@
         const flow = group.querySelector('.connection-flow');
         routes.push({ index, from: connection.from, to: connection.to, kind: connection.kind, psv: !!connection.psv,
           fromPort: ends.from.id, toPort: ends.to.id, style: connection.style || 'rigid',
-          waypoints: connection.waypoints,
+          waypoints: connection.waypoints, lane: connection.lane || 'P',
           psvPoint: psvPoint(`connection-${index}`), psvPosition: num(connection.psvPosition, 50),
           points: sample(path), color: path.getAttribute('stroke'), width: num(path.getAttribute('stroke-width'), 2),
           flow: flow ? flow.classList.contains('rev') ? 'reverse' : 'forward' : 'none' });
@@ -3674,22 +3757,29 @@
         (n.schematic ? n.nominalPorts : n.ports).filter((port) => !lane || port.lane === lane).map((port) => ({
           node: n.id, port: port.id, distance: Math.hypot(port.x - p.x, port.y - p.y),
         }))).filter((match) => match.distance < .1).sort((a, b) => a.distance - b.distance)[0];
+      const riserIdentities = new Map();
       svg.querySelectorAll('[data-riser-host]').forEach((group) => {
         const path = group.querySelector('path:not(.legacy-riser-hit):not(.flow)');
         if (!path || !path.getTotalLength()) return;
         const points = sample(path), from = group.dataset.riserHost;
         const preset = findItem(from)?.item.risers?.[+group.dataset.riserIndex];
         const to = atPort(points.at(-1), preset?.lane || 'P', from);
-        routes.push({ from, to: to?.node, toPort: to?.port, kind: 'riser', points, color: path.getAttribute('stroke'),
+        const identity = ['riser', from, preset?.lane || 'P', num(preset?.slot, 0), to?.node, to?.port];
+        const identityKey = JSON.stringify(identity), occurrence = riserIdentities.get(identityKey) || 0;
+        riserIdentities.set(identityKey, occurrence + 1);
+        routes.push({ routeKey: JSON.stringify([...identity, occurrence]), from, to: to?.node, toPort: to?.port, kind: 'riser', points, color: path.getAttribute('stroke'),
           fromPort: `J-${num(preset?.slot, 0)}`, psv: !!preset?.psv, psvPoint: psvPoint(`${from}:${group.dataset.riserIndex}`),
-          style: preset?.style || 'rigid',
+          style: preset?.style || 'rigid', lane: preset?.lane || 'P',
           width: num(path.getAttribute('stroke-width'), 2), flow: direction(path) });
       });
       svg.querySelectorAll('#content path,#content line').forEach((path) => {
         if (path.closest('.el,.connection,[data-riser-host]') || !path.hasAttribute('data-flow-lane') || !path.getTotalLength()) return;
         const points = sample(path);
         const from = atPort(points[0], path.dataset.flowLane), to = atPort(points.at(-1), path.dataset.flowLane);
-        routes.push({ from: from?.node, fromPort: from?.port, to: to?.node, toPort: to?.port, implicit: true, points, color: path.getAttribute('stroke'),
+        const identity = from && to ? [from.node, from.port, to.node, to.port]
+          : [path.closest('.train')?.dataset.train, path.getAttribute('d') || ['x1', 'y1', 'x2', 'y2'].map((a) => path.getAttribute(a))];
+        routes.push({ routeKey: JSON.stringify(['implicit', path.dataset.flowLane, ...identity]),
+          lane: path.dataset.flowLane, from: from?.node, fromPort: from?.port, to: to?.node, toPort: to?.port, implicit: true, points, color: path.getAttribute('stroke'),
           width: num(path.getAttribute('stroke-width'), 2), flow: direction(path) });
       });
       if (!st.spec.freeform) {
@@ -3715,6 +3805,11 @@
           }
         }
       }
+      for (const route of routes) {
+        route.routeKey ||= JSON.stringify(Number.isInteger(route.index) ? ['connection', route.index]
+          : ['bridge', route.from, route.fromPort, route.to, route.toPort, route.lane]);
+        if (!Number.isInteger(route.index)) route.waypoints = st.spec.routeAnchors3D?.[route.routeKey];
+      }
       return { nodes, routes, zones: [...zoneLayouts].map(([index, geometry]) => ({
         ...geometry, label: st.spec.zones[index].label || 'Zone',
       })), selected: st.sel, animate: !!st.spec.animate, speed: num(st.spec.animSpeed, 1) };
@@ -3722,6 +3817,68 @@
     st.move3DEquipment = (id, dx, dy) => {
       if (!Number.isFinite(dx) || !Number.isFinite(dy) || !findItem(id)) throw new Error('Invalid 3D equipment movement.');
       moveElements(captureElements([id]), dx, dy, true); render(true); select(id);
+    };
+    st.edit3DConnection = (edit) => {
+      const connections = st.spec.connections || [];
+      const existing = Number.isInteger(edit.index) ? connections[edit.index] : null;
+      if (edit.index !== undefined && !existing) throw new Error('The selected connection no longer exists.');
+      let candidate;
+      if (edit.waypoints !== undefined) {
+        if (!existing || !Array.isArray(edit.waypoints) || edit.waypoints.some((p) => !p
+          || !Number.isFinite(p.x) || !Number.isFinite(p.y)
+          || p.elevation3D !== undefined && !Number.isFinite(p.elevation3D))) throw new Error('Anchor coordinates must be finite numbers.');
+        candidate = { ...existing, waypoints: edit.waypoints.map((p) => ({ ...p })) };
+      } else if (edit.waypoint) {
+        if (!existing || !Number.isFinite(edit.waypoint.x) || !Number.isFinite(edit.waypoint.y)
+          || !Number.isInteger(edit.waypointIndex) || edit.waypointIndex < 0
+          || edit.waypointIndex > (existing.waypoints || []).length) throw new Error('Invalid route bend.');
+        candidate = { ...existing, waypoints: [...(existing.waypoints || [])] };
+        candidate.waypoints[edit.waypointIndex] = { x: edit.waypoint.x, y: edit.waypoint.y };
+      } else {
+        candidate = existing ? { ...existing } : { installationStatus: 'New', style: 'flex' };
+        for (const end of ['from', 'to']) {
+          if (edit[end] !== undefined) { candidate[end] = edit[end]; candidate[end + 'Port'] = edit[end + 'Port']; }
+        }
+        if (!candidate.from || candidate.from === candidate.to) throw new Error('Connect ports on two different elements.');
+        const ports = ['from', 'to'].map((end) => {
+          const element = svg.querySelector(`.el[data-id="${CSS.escape(candidate[end])}"]`);
+          return element && portsFor(element).find((p) => p.id === candidate[end + 'Port']);
+        });
+        if (ports.some((p) => !p)) throw new Error('The selected port is unavailable.');
+        const [from, to] = ports;
+        const lane = existing?.lane || (from.lane === 'any' ? to.lane === 'any' ? 'P' : to.lane : from.lane);
+        if (ports.some((p) => p.lane !== 'any' && p.lane !== lane)) throw new Error('Lane mismatch: connect P to P, S to S, or U to U.');
+        candidate.lane = lane;
+        if (!existing && (from.connectionType || to.connectionType)) candidate.connectionType = from.connectionType || to.connectionType;
+        if (!candidate.kind && (from.hostSlot || to.hostSlot)) candidate.kind = 'riser';
+      }
+      const duplicate = connections.some((c, i) => i !== edit.index
+        && (c.from === candidate.from && c.fromPort === candidate.fromPort && c.to === candidate.to && c.toPort === candidate.toPort
+          || c.from === candidate.to && c.fromPort === candidate.toPort && c.to === candidate.from && c.toPort === candidate.fromPort));
+      if (duplicate) throw new Error('These ports are already connected. Select the existing line to edit its end or bend.');
+      if (existing) connections[edit.index] = candidate;
+      else { st.spec.connections = connections; connections.push(candidate); }
+      st.sel = null; selectedIds.clear(); selectedZone = null;
+      selectedConnection = existing ? edit.index : connections.length - 1;
+      render(true); highlight(); fillInsp();
+      return selectedConnection;
+    };
+    st.edit3DRoute = ({ routeKey, anchors }) => {
+      if (!Array.isArray(anchors) || anchors.some((p) => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y)
+        || p.elevation3D !== undefined && !Number.isFinite(p.elevation3D))) throw new Error('Anchor coordinates must be finite numbers.');
+      const source = st.getScene3D();
+      const route = source.routes.find((r) => r.routeKey === routeKey);
+      const pipe = source.nodes.flatMap((n) => root.Subsea3D.families[n.type] === 'pipe' ? n.pipes : []).find((p) => p.routeKey === routeKey);
+      if (!route && !pipe) throw new Error('This 3D line no longer exists. Select a current line.');
+      if (Number.isInteger(route?.index)) st.edit3DConnection({ index: route.index, waypoints: anchors });
+      else {
+        const overrides = st.spec.routeAnchors3D || (st.spec.routeAnchors3D = {});
+        if (anchors.length) overrides[routeKey] = anchors.map((p) => ({ ...p }));
+        else delete overrides[routeKey];
+        if (!Object.keys(overrides).length) delete st.spec.routeAnchors3D;
+        notifyChange();
+      }
+      return routeKey;
     };
     const viewButtons = () => {
       for (const [id, pressed] of [['b_2d', !wants3D], ['b_3d', wants3D]]) {
@@ -3744,6 +3901,8 @@
         if (!viewer3D) {
           if (!loading3D) loading3D = root.Subsea3D.create({
             container: $('#scene3d'), getData: st.getScene3D, select, move: st.move3DEquipment,
+            editConnection: st.edit3DConnection,
+            editRoute: st.edit3DRoute,
             initialView: initialView.mode === '3d' ? initialView : null,
             selectConnection: (index) => { if (!Number.isInteger(index)) return; st.sel = null; selectedIds.clear(); selectedZone = null; selectedConnection = index; renderConnections(); highlight(); fillInsp(); },
           });

@@ -48,6 +48,31 @@ TIEBACK = {
     "titleBlock": {"drawing": "Subsea layout – general arrangement", "rev": "A", "docNo": "SSL-0001"},
 }
 
+SINGLE_JACKUP = {
+    "title": "Single 4-slot template tie-in to a jackup",
+    "subtitle": "Illustrative subsea tie-in and elevated jackup host",
+    "source": "Generic concept; dimensions, duties and tags require project engineering",
+    "host": {"id": "jackup", "type": "jackup", "label": "Jackup", "slots": ["Production", "Service", "Control"],
+             "activeSlot": 0, "showJTubes": True, "jTubeSide": "right",
+             "risers": [{"lane": "P", "slot": 0, "style": "rigid", "label": "Production riser"},
+                        {"lane": "S", "slot": 1, "style": "rigid", "label": "Service riser"},
+                        {"lane": "U", "slot": 2, "style": "static", "label": "Control umbilical"}]},
+    "lanes": {"S": True, "U": True}, "gap": 32, "animate": False, "showLegend": True,
+    "chain": [
+        {"id": "ssiv", "type": "ssiv", "tag": "XV-101"},
+        {"id": "sdu", "type": "sdu", "label": "SDU"},
+        {"id": "flowline", "type": "pipeline_pip", "w": 260},
+        {"id": "template", "type": "template", "label": "4-slot template", "wells": 4,
+         "wellStart": 1, "treeType": "vxt", "hipps": False},
+    ],
+    "notes": [
+        "Single four-slot template; all geometry and tags are illustrative, not to scale.",
+        "Lengths, sizes and equipment ratings are intentionally unspecified.",
+        "Confirm the jackup's intended drilling, well-test or production duty and receiving facilities.",
+        "Riser support, temporary services, pressure protection and well barriers require independent engineering.",
+    ],
+}
+
 SINGLE_FPSO = {
     "title": "Single template tied back to FPSO",
     "host": {"type": "fpso", "slots": ["Turret"], "activeSlot": 0,
@@ -365,6 +390,7 @@ PRESETS = {
     "Loops, parallel lines and mirrored train": LOOP_PARALLEL,
     "Electrical single-line diagram": SINGLE_LINE,
     "Single template to FPSO": SINGLE_FPSO,
+    "Single 4-slot template to jackup": SINGLE_JACKUP,
     "Subsea processing station": PROCESSING,
     "Water injection (SRP + manifold)": WATER_INJECTION,
     "North Sea concept: separation and boosting": SEPARATION_CONCEPT,

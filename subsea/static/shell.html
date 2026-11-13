@@ -98,6 +98,11 @@
 .scene3d-tools button{border:1px solid #7aadb8;border-radius:4px;padding:7px 10px;background:#0b3442;color:#fff;cursor:pointer}
 .scene3d-tools button.on{background:#276784}
 .scene3d-tools button:disabled{opacity:.45;cursor:not-allowed}
+#scene3d-anchors{position:absolute;left:12px;top:96px;z-index:3;width:250px;max-height:calc(100% - 170px);overflow:auto;padding:10px;background:#0b3442ed;color:#fff;border:1px solid #7aadb8;font:12px Arial,sans-serif}
+#scene3d-anchors[hidden]{display:none}
+#scene3d-anchors label{display:block;margin:7px 0}
+#scene3d-anchors select,#scene3d-anchors input{box-sizing:border-box;width:100%;padding:5px;font:inherit}
+#scene3d-anchors button{padding:6px;margin:4px 3px 4px 0;cursor:pointer}
 #scene3d-info{position:absolute;left:12px;bottom:12px;max-width:calc(100% - 285px);color:#e5f5f8;background:#062832dd;padding:8px 12px;font-size:11px;pointer-events:none}
 #scene3d-error{position:absolute;left:12px;top:58px;background:#fff;color:#b42318;padding:12px;z-index:3}
 #scene3d-error:empty{display:none}
@@ -128,7 +133,17 @@
   </div>
   <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
   <section id="scene3d" hidden aria-label="Interactive 3D view">
-    <div class="scene3d-tools"><button id="scene3d-orbit" class="on" aria-pressed="true">Orbit / inspect</button><button id="scene3d-move" aria-pressed="false">Move equipment</button><button id="scene3d-focus" disabled>Focus selected</button><button id="scene3d-top">Top view</button><button id="scene3d-labels" aria-pressed="false">Labels</button></div>
+    <div class="scene3d-tools"><button id="scene3d-orbit" class="on" aria-pressed="true">Orbit / inspect</button><button id="scene3d-move" aria-pressed="false">Move equipment</button><button id="scene3d-connect" aria-pressed="false">Connect / route lines</button><button id="scene3d-anchor-mode" aria-pressed="false">Anchor points</button><button id="scene3d-focus" disabled>Focus selected</button><button id="scene3d-top">Top view</button><button id="scene3d-labels" aria-pressed="false">Labels</button></div>
+    <div id="scene3d-anchors" hidden aria-label="3D route anchor editor">
+      <strong>Route anchor points</strong>
+      <label>Flowline / service / umbilical<select id="scene3d-route"></select></label>
+      <label>Anchor<select id="scene3d-anchor"></select></label>
+      <button id="scene3d-anchor-add">Add anchor</button><button id="scene3d-anchor-remove" disabled>Remove anchor</button>
+      <label>Layout X<input id="scene3d-anchor-x" type="number" step="any"></label>
+      <label>Layout Y<input id="scene3d-anchor-y" type="number" step="any"></label>
+      <label>Height (3D units)<input id="scene3d-anchor-height" type="number" step="any"></label>
+      <p>Click a line to select it. Drag square anchors to edit. Click a green ring between anchors to insert a point there. Endpoints stay attached. Coordinates are illustrative, not metres.</p>
+    </div>
     <div id="scene3d-error" role="alert"></div><div id="scene3d-info">Loading 3D renderer...</div>
   </section>
   <aside id="palette" aria-label="Symbol library">

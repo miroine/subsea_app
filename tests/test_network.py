@@ -9,6 +9,20 @@ def test_all_presets_valid():
     for n in PRESETS:
         assert validate(get_preset(n)) == [], (n, validate(get_preset(n)))
 
+def test_single_four_slot_jackup_preset():
+    name = "Single 4-slot template to jackup"
+    spec = get_preset(name)
+    assert spec["host"]["type"] == "jackup"
+    assert [(r["lane"], r["slot"]) for r in spec["host"]["risers"]] == [("P", 0), ("S", 1), ("U", 2)]
+    template = [item for item in spec["chain"] if item["type"] == "template"]
+    assert len(template) == 1 and template[0]["wells"] == 4
+    inventory = equipment_list(spec)
+    assert totals(inventory)["wells"] == 4
+    assert inventory.loc[inventory["Type"] == "template", "Qty"].sum() == 1
+    assert inventory.loc[inventory["Type"] == "pipeline_pip", ["Size (in)", "Length (km)"]].isna().all().all()
+    spec["chain"][-1]["wells"] = 6
+    assert get_preset(name)["chain"][-1]["wells"] == 4
+
 def test_branch_ops_and_validation():
     s = get_preset("Branched network: manifolds + injection + gas lift")
     assert len(trains(s)) == 3

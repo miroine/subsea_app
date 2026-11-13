@@ -74,6 +74,23 @@ def test_validate_flags_unknown():
     s = get_preset("Blank – jacket only"); s["chain"] = [{"type": "nope", "id": "z"}]; s["zones"] = [{"from": "q", "label": "L"}]
     assert len(validate(s)) == 2
 
+def test_validate_3d_route_anchors():
+    s = get_preset("Blank canvas – draw your own")
+    key = json.dumps(["pipe", "line", "P"])
+    s["routeAnchors3D"] = {key: [{"x": 100, "y": 200, "elevation3D": 2.5}, {"x": -10, "y": 0}]}
+    assert validate(s) == []
+    for anchors in ([], {key: {}}, {key: [None]}, {key: [{"x": True, "y": 0}]},
+                    {key: [{"x": float("inf"), "y": 0}]},
+                    {key: [{"x": 1, "y": 2, "elevation3D": float("nan")}]}):
+        s["routeAnchors3D"] = anchors
+        assert any("3D route" in problem for problem in validate(s)), anchors
+    s.pop("routeAnchors3D")
+    s["chain"] = [{"id": "a", "type": "plet"}, {"id": "b", "type": "plet"}]
+    s["connections"] = [{"from": "a", "to": "b", "lane": "P", "waypoints": [{"x": 1, "y": 2, "elevation3D": 3}]}]
+    assert validate(s) == []
+    s["connections"][0]["waypoints"][0]["elevation3D"] = float("inf")
+    assert any("3D anchor height" in problem for problem in validate(s))
+
 if __name__ == "__main__":
     for k, f in list(globals().items()):
         if k.startswith("test_"): f(); print("ok", k)

@@ -596,7 +596,7 @@ with selected_panel:
                 specific["lineWidth"] = st.number_input("Flowline thickness", min_value=0.5, max_value=20.0,
                                                         value=float(item.get("lineWidth", spec.get("connectionWidth", 2.2))), step=0.5, key=f"{edit_key}_line_width")
             if item["type"] in HOST_IDS:
-                if item["type"] in ("jacket", "platform"):
+                if item["type"] in ("jacket", "platform", "jackup"):
                     specific["showJTubes"] = st.checkbox("Draw J-tubes with pulled-in risers", item.get("showJTubes", False), key=f"{edit_key}_show_jtubes")
                     specific["jTubeSide"] = st.selectbox("J-tube seabed exit", ["left", "right"],
                                                         index=1 if item.get("jTubeSide") == "right" else 0, key=f"{edit_key}_jtube_side")

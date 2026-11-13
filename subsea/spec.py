@@ -146,6 +146,17 @@ def validate(spec: dict, custom_ids: list[str] | None = None) -> list[str]:
     def finite(value):
         return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
 
+    anchors = spec.get("routeAnchors3D", {})
+    if not isinstance(anchors, dict):
+        out.append("3D route anchors must be an object keyed by route.")
+    else:
+        for key, points in anchors.items():
+            if not isinstance(key, str) or not isinstance(points, list) or any(
+                not isinstance(p, dict) or not finite(p.get("x")) or not finite(p.get("y"))
+                or "elevation3D" in p and not finite(p["elevation3D"]) for p in points
+            ):
+                out.append(f"3D route {key!r}: anchors require finite x/y coordinates and optional finite height.")
+
     if "connectionWidth" in spec and (not finite(spec["connectionWidth"]) or not 0.5 <= spec["connectionWidth"] <= 20):
         out.append("Default connection thickness must be between 0.5 and 20.")
     sea = spec.get("seaLevel", {})
@@ -237,6 +248,8 @@ def validate(spec: dict, custom_ids: list[str] | None = None) -> list[str]:
             for point in points
         ):
             out.append(f"connection {index}: route bends must have finite x/y coordinates.")
+        elif any("elevation3D" in point and not finite(point["elevation3D"]) for point in points):
+            out.append(f"connection {index}: 3D anchor height must be finite.")
     return out
 
 

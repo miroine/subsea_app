@@ -99,6 +99,7 @@ def run():
         assert_attached(page, source, target)
         saved = page.evaluate("window.__subsea.spec")
         assert saved["connections"] == [{
+            "installationStatus": "New",
             "from": "plem", "to": "template", "fromPort": "P-right", "toPort": "P-left", "lane": "P",
         }]
         print("PASS: PLEM-to-template port drag and exact endpoint alignment")
